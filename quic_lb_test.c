@@ -5,7 +5,10 @@
  */
 
 #ifdef NOBIGIP
-#include <openssl/evp.h>
+#include <assert.h>
+#include <stdio.h>
+#include <string.h>
+#include <openssl/rand.h>
 #include "quic_lb.h"
 #else
 #include <local/sys/types.h>
@@ -22,42 +25,51 @@
 #define TEST_QUIC_LB_NUM_SRV_ID 5
 #define TEST_QUIC_LB_PER_SERVER 1
 
+#ifdef NOBIGIP
+#define CUT_ASSERT(arg) assert(arg)
+#define RAND_bytes(ptr,size) RAND_bytes((unsigned char *)(ptr), size)
+#define ERR_OK 0
+
+static inline u_int8_t
+rnd8_range(u_int8_t max)
+{
+    u_int8_t value;
+    RAND_bytes(&value, sizeof(max));
+    return ((max < UINT8_MAX) ? (value % (max + 1)) : value);
+}
+#endif /* NOBIGIP */
 
 static void
 test_quic_lb_ocid(void)
 {
-    UINT8  bitmask[QUIC_LB_MAX_CID_LEN - 1], cid[QUIC_LB_MAX_CID_LEN],
+    u_int8_t  bitmask[QUIC_LB_MAX_CID_LEN - 1], cid[QUIC_LB_MAX_CID_LEN],
             one_count, zero_count;
-    UINT8  divisor[QUIC_LB_OCID_SIDL_MAX], modulus[QUIC_LB_OCID_SIDL_MAX],
+    u_int8_t  divisor[QUIC_LB_OCID_SIDL_MAX], modulus[QUIC_LB_OCID_SIDL_MAX],
             result[QUIC_LB_OCID_SIDL_MAX];
-    BOOL   len_encode;
+    bool   len_encode;
     size_t mask_len, cid_len;
-    const UINT8 sidl = 2;
+    const u_int8_t sidl = 2;
     int    cfg, srv, run, i;
     void  *record;
 
     for (cfg = 0; cfg < TEST_QUIC_LB_NUM_CONFIG; cfg++) {
-        mask_len = rnd8_range(RND_PSEUDO, 9) + 10;
+        mask_len = rnd8_range(9) + 10;
         cid_len = mask_len + 1;
-try_again:
-        one_count = 0;
-        len_encode = (cfg % 2 == 0);
-        memset(bitmask, 0, sizeof(bitmask));
-        rndset(bitmask, RND_PSEUDO, mask_len);
-        for (i = 0; i < mask_len; i++) {
-            one_count +=  bit_count((UINT32)bitmask[i]);
-        }
-        zero_count = (8 * mask_len) - one_count;
-        if (zero_count < 16) {
-            goto try_again;
-        }
-        if (one_count < 32) {
-            goto try_again;
+        zero_count = 0;
+        while ((one_count < 32) || (zero_count < 16)) {
+            one_count = 0;
+            len_encode = (cfg % 2 == 0);
+            memset(bitmask, 0, sizeof(bitmask));
+            RAND_bytes(bitmask, mask_len);
+            for (i = 0; i < mask_len; i++) {
+                one_count += bit_count((u_int32_t)bitmask[i]);
+            }
+            zero_count = (8 * mask_len) - one_count;
         }
         memset(divisor, 0, sizeof(divisor));
         while (divisor[sidl] == 0) {
             /* Divisor had better be larger than all SIDs! */
-            rndset(&divisor, RND_PSEUDO, sidl + 1);
+            RAND_bytes(&divisor, sidl + 1);
         }
         divisor[0] |= 0x1; /* always odd */
 #ifdef NOBIGIP
@@ -74,7 +86,7 @@ try_again:
 #endif
         memset(modulus, 0, sizeof(modulus));
         for (srv = 0; srv < TEST_QUIC_LB_NUM_SRV_ID; srv++) {
-            rndset(modulus, RND_PSEUDO, sidl);
+            RAND_bytes(modulus, sidl);
             record = quic_lb_load_ocid_config(0, len_encode, bitmask, modulus,
                     divisor, sidl);
             CUT_ASSERT(record != NULL);
@@ -85,7 +97,7 @@ try_again:
                 for (i = 0; i < (mask_len + 1); i++) {
                     printf("%02x", cid[i]);
                 }
-                printf("sid ");
+                printf(" sid ");
                 for (i = 0; i < sidl; i++) {
                     printf("%02x", modulus[i]);
                 }
@@ -97,7 +109,6 @@ try_again:
                 CUT_ASSERT(cid_len == mask_len + 1);
             }
             quic_lb_free_config(record);
-            ufree(record);
         }
     }
 }
@@ -105,19 +116,20 @@ try_again:
 static void
 test_quic_lb_scid(void)
 {
-    UINT8  key[16], nonce_len, sidl = 0, sid[QUIC_LB_SCID_SIDL_MAX],
-             cid[QUIC_LB_MAX_CID_LEN];
-    UINT8  result[QUIC_LB_SCID_SIDL_MAX];
+    u_int8_t  key[16], nonce_len, sidl = 0, sid[QUIC_LB_SCID_SIDL_MAX],
+             cid[QUIC_LB_MAX_CID_LEN], max_nonce_len;
+    u_int8_t  result[QUIC_LB_SCID_SIDL_MAX];
     int    cfg, srv, run, i;
     size_t cid_len;
     void  *record;
-    BOOL   len_encode;
+    bool   len_encode;
 
     for (cfg = 0; cfg < TEST_QUIC_LB_NUM_CONFIG; cfg++) {
-        rndset(key, RND_PSEUDO, sizeof(key));
+        RAND_bytes(key, sizeof(key));
         len_encode = (cfg % 2 == 0);
         sidl++;
-        nonce_len = rnd8_range(RND_PSEUDO, 10 - sidl) + 8;
+        max_nonce_len = ((19 - sidl) > 16) ? 16 : (19 - sidl);
+        nonce_len = rnd8_range(max_nonce_len - 8) + 8;
         cid_len = sidl + nonce_len + 1;
 #ifdef NOBIGIP
         printf("SCID LB configuration: cr_bits 0x0 length_self_encoding: %s "
@@ -131,7 +143,7 @@ test_quic_lb_scid(void)
 #endif
         for (srv = 0; srv < TEST_QUIC_LB_NUM_SRV_ID; srv++) {
             memset(sid, 0, sizeof(sid));
-            rndset(sid, RND_PSEUDO, sidl);
+            RAND_bytes(sid, sidl);
             record = quic_lb_load_scid_config(0, len_encode, key, sidl,
                     nonce_len, sid);
             CUT_ASSERT(record != NULL);
@@ -154,7 +166,6 @@ test_quic_lb_scid(void)
                 CUT_ASSERT(cid_len == sidl + nonce_len + 1);
             }
             quic_lb_free_config(record);
-            ufree(record);
         }
     }
 }
@@ -162,15 +173,15 @@ test_quic_lb_scid(void)
 static void
 test_quic_lb_bcid(void)
 {
-    UINT8  key[16], sidl = 0, sid[8], cid[QUIC_LB_MAX_CID_LEN];
-    UINT8  result[QUIC_LB_BCID_SIDL_MAX];
+    u_int8_t  key[16], sidl = 0, sid[8], cid[QUIC_LB_MAX_CID_LEN];
+    u_int8_t  result[QUIC_LB_BCID_SIDL_MAX];
     int    cfg, srv, run, i;
     void  *svr_cfg, *lb_cfg;
     size_t cid_len = QUIC_LB_MAX_CID_LEN, zp_len;
-    BOOL   len_encode;
+    bool   len_encode;
 
     for (cfg = 0; cfg < TEST_QUIC_LB_NUM_CONFIG; cfg++) {
-        rndset(key, RND_PSEUDO, sizeof(key));
+        RAND_bytes(key, sizeof(key));
         len_encode = (cfg % 2 == 0);
         sidl++;
         zp_len = 12 - sidl;
@@ -185,11 +196,11 @@ test_quic_lb_bcid(void)
 #endif
         for (srv = 0; srv < TEST_QUIC_LB_NUM_SRV_ID; srv++) {
             memset(sid, 0, sizeof(sid));
-            rndset(sid, RND_PSEUDO, sidl);
+            RAND_bytes(sid, sidl);
             svr_cfg = quic_lb_load_bcid_config(0, len_encode, key, sidl, zp_len,
-                    sid, TRUE);
+                    sid, true);
             lb_cfg = quic_lb_load_bcid_config(0, len_encode, key, sidl, zp_len,
-                    sid, FALSE);
+                    sid, false);
             CUT_ASSERT(svr_cfg != NULL);
             CUT_ASSERT(lb_cfg != NULL);
             for (run = 0; run < TEST_QUIC_LB_PER_SERVER; run++) {
@@ -197,7 +208,7 @@ test_quic_lb_bcid(void)
                 CUT_ASSERT(quic_lb_decrypt_cid(cid, lb_cfg, &cid_len, result) ==
                         ERR_OK);
 #ifdef NOBIGIP
-                printf("cid: ");
+                printf("cid ");
                 for (i = 0; i < QUIC_LB_MAX_CID_LEN; i++) {
                     printf("%02x", cid[i]);
                 }
@@ -212,8 +223,6 @@ test_quic_lb_bcid(void)
             }
             quic_lb_free_config(svr_cfg);
             quic_lb_free_config(lb_cfg);
-            ufree(svr_cfg);
-            ufree(lb_cfg);
         }
     }
 }

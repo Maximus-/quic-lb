@@ -7,7 +7,7 @@
 #define _QUIC_LB_H_
 
 #ifdef NOBIGIP
-#include "quic_lb_types.h"
+#include <stdbool.h>
 #else
 #include <local/sys/types.h>
 #endif
@@ -19,6 +19,23 @@
 #define QUIC_LB_SCID_SIDL_MAX 11
 #define QUIC_LB_BCID_SIDL_MAX 11
 
+#ifdef NOBIGIP
+static inline unsigned
+bit_count(u_int8_t i)
+{
+    u_int8_t octet = i;
+    unsigned count = 0;
+
+    while (i > 0) {
+        if ((i & 0x1) == 1) {
+            count++;
+        }
+        i >>= 1;
+    }
+    return count;
+}
+#endif /* NOBIGIP */
+
 void quic_lb_encrypt_cid(void *cid, void *config, size_t cid_len,
         void *server_use);
 /*
@@ -26,15 +43,14 @@ void quic_lb_encrypt_cid(void *cid, void *config, size_t cid_len,
  * the server use octets.
  */
 void quic_lb_encrypt_cid_random(void *cid, void *config, size_t cid_len);
-err_t quic_lb_decrypt_cid(void *cid, void *config, size_t *cid_len,
+int quic_lb_decrypt_cid(void *cid, void *config, size_t *cid_len,
         void *result);
 /* Temporary functions */
-void *quic_lb_load_ocid_config(UINT8 cr, BOOL encode_len, UINT8 *bitmask,
-        UINT8 *modulus, UINT8 *divisor, UINT8 sidl);
-void *quic_lb_load_scid_config(UINT8 cr, BOOL encode_len, UINT8 *key,
-        UINT8 cidl, UINT8 nonce_len, UINT8 *sid);
-void *quic_lb_load_bcid_config(UINT8 cr, BOOL encode_len, UINT8 *key,
-        UINT8 sidl, UINT8 zp_len, UINT8 *sid, BOOL encrypt);
+void *quic_lb_load_ocid_config(uint8_t cr, bool encode_len, uint8_t *bitmask,
+        uint8_t *modulus, uint8_t *divisor, uint8_t sidl);
+void *quic_lb_load_scid_config(uint8_t cr, bool encode_len, uint8_t *key,
+        uint8_t cidl, uint8_t nonce_len, uint8_t *sid);
+void *quic_lb_load_bcid_config(uint8_t cr, bool encode_len, uint8_t *key,
+        uint8_t sidl, uint8_t zp_len, uint8_t *sid, bool encrypt);
 void quic_lb_free_config(void *config);
-
 #endif /* _QUIC_LB_H */
