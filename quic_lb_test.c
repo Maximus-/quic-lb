@@ -8,6 +8,7 @@
 
 #ifdef NOBIGIP
 #include <assert.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include "quic_lb.h"
@@ -48,6 +49,9 @@ test_quic_lb_scid(void)
              cid[QUIC_LB_MAX_CID_LEN], max_nonce_len;
     u_int8_t  result[QUIC_LB_SCID_SIDL_MAX];
     int    cfg, srv, run;
+#ifdef NOBIGIP
+    int i;
+#endif
     size_t cid_len;
     void  *record;
     bool   len_encode;
@@ -104,6 +108,9 @@ test_quic_lb_bcid(void)
     u_int8_t  key[16], sidl = 0, sid[8], cid[QUIC_LB_MAX_CID_LEN];
     u_int8_t  result[QUIC_LB_BCID_SIDL_MAX];
     int    cfg, srv, run;
+#ifdef NOBIGIP
+    int i;
+#endif
     void  *svr_cfg, *lb_cfg;
     size_t cid_len = QUIC_LB_MAX_CID_LEN, zp_len;
     bool   len_encode;
